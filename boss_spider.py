@@ -9,15 +9,34 @@ from typing import Optional, Dict
 import os
 import csv
 from urllib.parse import quote, unquote
+# 城市名称 -> BOSS直聘城市ID 映射
+CITY_MAP = {
+    '北京': '101010100', '上海': '101020100', '天津': '101030100', '重庆': '101040100',
+    '哈尔滨': '101050100', '长春': '101060100', '沈阳': '101070100', '大连': '101070200',
+    '石家庄': '101090100', '太原': '101100100', '西安': '101110100', '济南': '101120100',
+    '青岛': '101120200', '郑州': '101180100', '南京': '101190100', '苏州': '101190400',
+    '无锡': '101190200', '常州': '101191100', '武汉': '101200100', '杭州': '101210100',
+    '宁波': '101210400', '温州': '101210300', '合肥': '101220100', '福州': '101230100',
+    '厦门': '101230200', '南昌': '101240100', '长沙': '101250100', '贵阳': '101260100',
+    '成都': '101270100', '昆明': '101290100', '广州': '101280100', '深圳': '101280600',
+    '佛山': '101280800', '东莞': '101281600', '珠海': '101280700', '中山': '101281700',
+    '惠州': '101280300', '南宁': '101300100', '海口': '101310100', '嘉兴': '101210500',
+    '绍兴': '101210600', '台州': '101210700', '金华': '101210900', '洛阳': '101180900',
+    '徐州': '101190800', '扬州': '101190600', '南通': '101190500', '烟台': '101120500',
+    '潍坊': '101120600', '临沂': '101120900', '潍坊': '101120600', '保定': '101090200',
+    '唐山': '101090500', '廊坊': '101090600', '泉州': '101230500', '漳州': '101230600',
+    '株洲': '101250300', '湘潭': '101250200', '咸阳': '101110200', '芜湖': '101220300',
+}
+
 def load_config():
-    """从 config.txt 读取关键词和城市ID"""
+    """从 config.txt 读取关键词和城市（支持直接填城市名称）"""
     cfg_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'config.txt')
-    defaults = {'keyword': '数据采集', 'city': '101210100'}
+    defaults = {'keyword': '数据采集', 'city': '杭州'}
     if not os.path.exists(cfg_file):
         with open(cfg_file, 'w', encoding='utf-8') as f:
             f.write('# BOSS直聘爬虫配置\n')
-            f.write('# 修改下面的关键词和城市ID后保存，重新运行即可生效\n')
-            f.write('# 城市ID示例：101210100=杭州 101280100=广州 101010100=北京 101020100=上海\n')
+            f.write('# keyword= 改成你要搜索的岗位关键词\n')
+            f.write('# city= 直接填城市名称，如：广州、深圳、杭州（也可填城市ID）\n')
             f.write(f"keyword={defaults['keyword']}\n")
             f.write(f"city={defaults['city']}\n")
         print(f"[配置] 已创建配置文件: {cfg_file}")
@@ -31,8 +50,16 @@ def load_config():
                 k, v = line.split('=', 1)
                 cfg[k.strip()] = v.strip()
     keyword = cfg.get('keyword', defaults['keyword'])
-    city = cfg.get('city', defaults['city'])
-    print(f"[配置] 关键词: {keyword} | 城市ID: {city}")
+    city_raw = cfg.get('city', defaults['city']).strip()
+    # 城市：纯数字直接用ID，否则按名称查表
+    if city_raw.isdigit():
+        city = city_raw
+    else:
+        city = CITY_MAP.get(city_raw, '')
+        if not city:
+            print(f"[警告] 未找到城市「{city_raw}」的ID，已回退到杭州")
+            city = '101210100'
+    print(f"[配置] 关键词: {keyword} | 城市: {city_raw} (ID:{city})")
     return {
         "start_url": f'https://www.zhipin.com/web/geek/jobs?city={city}&query={keyword}',
         "heart_time": 15,
