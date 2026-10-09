@@ -176,6 +176,13 @@ class BossGUI:
         bs.Config = bs.load_config()
         self.set_busy(True)
         self.status.set(f"采集中：{kw} / {city} / 目标 {count} 条")
+        # 自动打开导出文件夹，便于实时查看结果
+        try:
+            exp_dir = os.path.join(BASE, '导出结果')
+            os.makedirs(exp_dir, exist_ok=True)
+            os.startfile(exp_dir)
+        except Exception:
+            pass
         self.worker = threading.Thread(target=self._crawl_worker, args=(count,), daemon=True)
         self.worker.start()
 

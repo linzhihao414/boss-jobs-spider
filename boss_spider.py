@@ -407,7 +407,7 @@ class BossDP:
                     relevant_jobs.append(job)
                 else:
                     filtered_count += 1
-                    print(f"白名单过滤: {job['jobName']}")
+                    print(f"关键词过滤: {job['jobName']}")
             # 检测连续无新相关岗位
             if len(relevant_jobs) == 0:
                 consecutive_empty += 1
@@ -523,6 +523,12 @@ class BossDP:
                 except Exception:
                     pass
                 self.all_jobs.append(job_data)
+                # 每5条实时保存，便于及时查看结果
+                if len(self.all_jobs) % 5 == 0:
+                    try:
+                        self.save_to_csv()
+                    except Exception:
+                        pass
                 delay=random.uniform(5,7)#请求延迟
                 time.sleep(delay)
             # 每页结束自动保存（防中途关闭丢数据）
