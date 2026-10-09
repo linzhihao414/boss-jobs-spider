@@ -293,15 +293,36 @@ class BossDP:
         if brand_id in self.company_cache:
             return self.company_cache[brand_id]
         info = {'公司主页':'', '公司全称':'', '公司简介':'', '主营产品':'', '公司地址':'', '联系方式':'',
-                '统一社会信用代码':'', '法定代表人':'', '注册资本':'', '成立日期':'', '注册地址':'', '经营范围':'', '经营状态':''}
+                '统一社会信用代码':'', '法定代表人':'', '注册资本':'', '成立日期':'', '注册地址':'', '经营范围':'', '经营状态':'', '成立年限':''}
         try:
             url = f"https://www.zhipin.com/gongsi/{brand_id}.html"
             info['公司主页'] = url
             self.page.get(url)
-            time.sleep(random.uniform(2,4))
+            time.sleep(random.uniform(3,5))
+            # 滚动到底部，触发懒加载（工商信息一般在页面底部）
+            try:
+                self.page.scroll.to_bottom()
+                time.sleep(1.5)
+            except Exception:
+                pass
+            # 尝试点击"工商信息"展开区域
+            try:
+                btn = self.page.ele('tag:div@text():工商信息', timeout=1)
+                if btn:
+                    btn.click()
+                    time.sleep(1.5)
+            except Exception:
+                pass
             try:
                 t = self.page.title or ''
                 info['公司全称'] = t.replace(' - BOSS直聘','').replace('- BOSS直聘','').strip()
+            except:
+                pass
+            # 优先用完整HTML（含折叠/隐藏节点），去标签后解析
+            import re as _re
+            full_html = ''
+            try:
+                full_html = self.page.html or ''
             except:
                 pass
             full = ''
@@ -309,35 +330,59 @@ class BossDP:
                 full = self.page.ele('body', timeout=1).text or ''
             except:
                 pass
-            # 清洗噪音行
-            lines = []
-            for ln in full.split('\n'):
-                s = ln.strip()
-                if not s:
-                    continue
-                if s in ('收藏','分享','举报','在招职位','公司环境','招聘动态','公司地址','工商信息'):
-                    continue
-                lines.append(s)
-            clean = '\n'.join(lines)
+            # HTML -> 纯文本（去掉script/style/标签，压缩空白）
+            txt = _re.sub(r'<script[\s\S]*?</script>', '', full_html)
+            txt = _re.sub(r'<style[\s\S]*?</style>', '', txt)
+            txt = _re.sub(r'<[^>]+>', '', txt)
+            txt = _re.sub(r'[ \t\u3000]+', ' ', txt)
+            txt = _re.sub(r'\n\s*\n+', '\n', txt)
+            if len(txt) > len(full):
+                clean = txt
+            else:
+                # 清洗噪音行
+                lines = []
+                for ln in full.split('\n'):
+                    s = ln.strip()
+                    if not s:
+                        continue
+                    if s in ('收藏','分享','举报','在招职位','公司环境','招聘动态','公司地址','工商信息'):
+                        continue
+                    lines.append(s)
+                clean = '\n'.join(lines)
             info['公司简介'] = clean[:1500]
             # 主营产品：找关键词段落
-            import re as _re
             m = _re.search(r'(主营[^\n]{0,80}|主营业务[^\n]{0,80}|主打[^\n]{0,80}|主要产品[^\n]{0,80})', clean)
             if m:
                 info['主营产品'] = m.group(0).strip()[:200]
             if not info['主营产品']:
                 info['主营产品'] = clean[:200].strip()
-            # 工商信息字段解析
+            # 工商信息字段解析（容忍空格/换行/无冒号）
             def _pick(pattern, text, group=1):
                 mm = _re.search(pattern, text)
                 return mm.group(group).strip() if mm else ''
-            info['统一社会信用代码'] = _pick(r'统一社会信用代码[:：]?\s*([0-9A-Z]{15,18})', clean)
-            info['法定代表人'] = _pick(r'法定代表人[:：]?\s*([^\n\r]{1,20})', clean)
-            info['注册资本'] = _pick(r'注册资本[:：]?\s*([^\n\r]{1,30})', clean)
-            info['成立日期'] = _pick(r'成立(?:日期|时间)?[:：]?\s*(\d{4}[-年/]\d{1,2}[-月/]\d{1,2}日?)', clean)
-            info['注册地址'] = _pick(r'注册地址[:：]?\s*([^\n\r]{5,150})', clean)
-            info['经营状态'] = _pick(r'经营状态[:：]?\s*([^\n\r]{1,20})', clean)
-            info['经营范围'] = _pick(r'经营范围[:：]?\s*([^\n\r]{20,800})', clean)
+            info['统一社会信用代码'] = _pick(r'统一社会信用代码\s*[:：]?\s*([0-9A-Z]{15,18})', clean)
+            info['法定代表人'] = _pick(r'法定代表人\s*[:：]?\s*([^\n\r]{1,20})', clean)
+            info['注册资本'] = _pick(r'注册资本\s*[:：]?\s*([^\n\r]{1,30})', clean)
+            info['成立日期'] = _pick(r'成立(?:日期|时间)?\s*[:：]?\s*(\d{4}\s*[-年/]\s*\d{1,2}\s*[-月/]\s*\d{1,2}\s*日?)', clean)
+            info['注册地址'] = _pick(r'注册地址\s*[:：]?\s*([^\n\r]{5,150})', clean)
+            info['经营状态'] = _pick(r'经营状态\s*[:：]?\s*([^\n\r]{1,20})', clean)
+            info['经营范围'] = _pick(r'经营范围\s*[:：]?\s*([^\n\r]{10,800})', clean)
+            # 成立年限：由成立日期精确计算（动态取当前日期）
+            info['成立年限'] = ''
+            try:
+                import datetime as _dt
+                dm = _re.search(r'(\d{4})\s*[-年/.]\s*(\d{1,2})\s*[-月/.]\s*(\d{1,2})?', info['成立日期'])
+                if dm:
+                    by = int(dm.group(1)); bm = int(dm.group(2)); bd = int(dm.group(3) or 1)
+                    born = _dt.date(by, min(bm,12), min(bd,28))
+                    today = _dt.date.today()
+                    years = today.year - born.year - ((today.month, today.day) < (born.month, born.day))
+                    if years >= 1:
+                        info['成立年限'] = f"{years}年"
+                    else:
+                        info['成立年限'] = "<1年"
+            except Exception:
+                pass
             # 公司地址：优先注册地址，其次常见地址行
             if not info['注册地址']:
                 m2 = _re.search(r'((?:广东|广州|深圳|上海|北京|浙江|杭州|东莞|佛山|中山|珠海|惠州|江门|汕头|湛江|肇庆|韶关|清远|梅州|河源|阳江|茂名|潮州|揭阳|云浮|汕尾)[^\n]{0,80})', clean)
@@ -347,7 +392,7 @@ class BossDP:
                 info['公司地址'] = info['注册地址'][:150]
             # 联系方式
             info['联系方式'] = self.extract_contact(full[:4000])
-            print(f"   公司: {info['公司全称'][:18]} | 信用代码: {info['统一社会信用代码'][:6] or '无'} | 注册地址: {info['注册地址'][:24] or '无'}")
+            print(f"   公司: {info['公司全称'][:18]} | 成立: {info['成立日期'] or '无'} | 年限: {info['成立年限'] or '无'} | 信用代码: {info['统一社会信用代码'][:6] or '无'}")
         except Exception as e:
             print(f" 公司页抓取失败: {e}")
         self.company_cache[brand_id] = info
@@ -455,6 +500,7 @@ class BossDP:
                     '法定代表人':'',
                     '注册资本':'',
                     '成立日期':'',
+                    '成立年限':'',
                     '注册地址':'',
                     '经营范围':'',
                     '经营状态':'',
@@ -487,7 +533,7 @@ class BossDP:
                     brand_id = job.get('encryptBrandId','')
                     c_info = self.fetch_company_info(brand_id)
                     for k in ('公司主页','公司全称','公司简介','主营产品','公司地址','联系方式',
-                             '统一社会信用代码','法定代表人','注册资本','成立日期','注册地址','经营范围','经营状态'):
+                             '统一社会信用代码','法定代表人','注册资本','成立日期','成立年限','注册地址','经营范围','经营状态'):
                         if c_info.get(k):
                             job_data[k] = c_info[k]
                 except Exception as e:
@@ -548,7 +594,7 @@ class BossDP:
         print(f"   实际入库: {len(self.all_jobs)}")
         return self.all_jobs
     def save_to_csv(self, filename: str = None):
-        """保存为 CSV 文件（默认导出到「导出结果」文件夹）"""
+        """保存为 CSV 文件（默认导出到「导出结果」文件夹，文件被占用时自动重试）"""
         if not self.all_jobs:
             print(" 没有数据可保存")
             return
@@ -561,14 +607,22 @@ class BossDP:
         new_rows = self.all_jobs[start:]
         if not new_rows:
             return
-        with open(filename, 'a', encoding='utf-8-sig', newline='') as f:
-            fieldnames = list(self.all_jobs[0].keys())
-            writer = csv.DictWriter(f, fieldnames=fieldnames)
-            if not file_exists:
-                writer.writeheader()
-            writer.writerows(new_rows)
-        self._saved_count = len(self.all_jobs)
-        print(f" 数据已追加: {filename} (+{len(new_rows)})")
+        # 文件可能被 Excel 占用，重试3次
+        for attempt in range(3):
+            try:
+                with open(filename, 'a', encoding='utf-8-sig', newline='') as f:
+                    fieldnames = list(self.all_jobs[0].keys())
+                    writer = csv.DictWriter(f, fieldnames=fieldnames)
+                    if not file_exists:
+                        writer.writeheader()
+                    writer.writerows(new_rows)
+                self._saved_count = len(self.all_jobs)
+                print(f" 数据已追加: {filename} (+{len(new_rows)})")
+                return
+            except PermissionError:
+                print(f" 导出文件被占用(请关闭Excel中打开的CSV)，重试 {attempt+1}/3...")
+                time.sleep(2)
+        print(" 导出失败：CSV文件被其他程序占用（请关闭Excel后重新采集，已采集数据保留在内存）")
                 
     #运行
     #运行
