@@ -374,11 +374,15 @@ class BossDP:
         print(f"   详情成功: {self.stats['details_success']}")
         print(f"   实际入库: {len(self.all_jobs)}")
         return self.all_jobs
-    def save_to_csv(self, filename: str = "boss_jobs.csv"):
-        """保存为 CSV 文件"""
+    def save_to_csv(self, filename: str = None):
+        """保存为 CSV 文件（默认导出到「导出结果」文件夹）"""
         if not self.all_jobs:
             print(" 没有数据可保存")
             return
+        if filename is None:
+            out_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), '导出结果')
+            os.makedirs(out_dir, exist_ok=True)
+            filename = os.path.join(out_dir, 'boss_jobs.csv')
         file_exists = os.path.isfile(filename)
         with open(filename, 'a', encoding='utf-8-sig', newline='') as f:
             fieldnames = list(self.all_jobs[0].keys())
@@ -408,15 +412,15 @@ class BossDP:
             print(f"目标数量: {target_count} 条，预计采集 {max_pages} 页")
             self.crawl(max_pages=max_pages)#设置关键词和页数
             if self.all_jobs:
-                self.save_to_csv("boss_jobs.csv")
+                self.save_to_csv()
         except KeyboardInterrupt:
             print("\\n 用户中断")
-            self.save_to_csv("boss_jobs.csv")
+            self.save_to_csv()
         except Exception as e:
             print(f" 程序异常: {e}")
             import traceback
             traceback.print_exc()
-            self.save_to_csv("boss_jobs.csv")
+            self.save_to_csv()
         finally:
             # 清理
             try:
