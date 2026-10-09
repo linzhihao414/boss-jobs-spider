@@ -1,0 +1,7 @@
+﻿# 忽略浏览器登录数据/缓存/测试脚本/导出结果
+browser_profile/
+__pycache__/
+*.pyc
+导出结果/
+_test*.py
+boss_jobs.csv
