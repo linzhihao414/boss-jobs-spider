@@ -256,6 +256,9 @@ class BossDP:
             "工作详细地址":job_info['address'],
             "公司介绍":brand_info.get('introduce','')
         }
+        if job_info.get('latitude'): out['纬度'] = job_info['latitude']
+        if job_info.get('longitude'): out['经度'] = job_info['longitude']
+        if job_info.get('locationName'): out['位置标签'] = job_info['locationName']
         if brand_info.get('brandName'):
             out['公司全称'] = brand_info['brandName']
         return out
@@ -289,7 +292,8 @@ class BossDP:
             return {}
         if brand_id in self.company_cache:
             return self.company_cache[brand_id]
-        info = {'公司主页':'', '公司全称':'', '公司简介':'', '主营产品':'', '公司地址':'', '联系方式':''}
+        info = {'公司主页':'', '公司全称':'', '公司简介':'', '主营产品':'', '公司地址':'', '联系方式':'',
+                '统一社会信用代码':'', '法定代表人':'', '注册资本':'', '成立日期':'', '注册地址':'', '经营范围':'', '经营状态':''}
         try:
             url = f"https://www.zhipin.com/gongsi/{brand_id}.html"
             info['公司主页'] = url
@@ -323,13 +327,27 @@ class BossDP:
                 info['主营产品'] = m.group(0).strip()[:200]
             if not info['主营产品']:
                 info['主营产品'] = clean[:200].strip()
-            # 公司地址：常见地址行
-            m2 = _re.search(r'((?:广东|广州|深圳|上海|北京|浙江|杭州|东莞|佛山|中山|珠海|惠州|江门|汕头|湛江|肇庆|韶关|清远|梅州|河源|阳江|茂名|潮州|揭阳|云浮|汕尾)[^\n]{0,60})', clean)
-            if m2:
-                info['公司地址'] = m2.group(0).strip()[:120]
+            # 工商信息字段解析
+            def _pick(pattern, text, group=1):
+                mm = _re.search(pattern, text)
+                return mm.group(group).strip() if mm else ''
+            info['统一社会信用代码'] = _pick(r'统一社会信用代码[:：]?\s*([0-9A-Z]{15,18})', clean)
+            info['法定代表人'] = _pick(r'法定代表人[:：]?\s*([^\n\r]{1,20})', clean)
+            info['注册资本'] = _pick(r'注册资本[:：]?\s*([^\n\r]{1,30})', clean)
+            info['成立日期'] = _pick(r'成立(?:日期|时间)?[:：]?\s*(\d{4}[-年/]\d{1,2}[-月/]\d{1,2}日?)', clean)
+            info['注册地址'] = _pick(r'注册地址[:：]?\s*([^\n\r]{5,150})', clean)
+            info['经营状态'] = _pick(r'经营状态[:：]?\s*([^\n\r]{1,20})', clean)
+            info['经营范围'] = _pick(r'经营范围[:：]?\s*([^\n\r]{20,800})', clean)
+            # 公司地址：优先注册地址，其次常见地址行
+            if not info['注册地址']:
+                m2 = _re.search(r'((?:广东|广州|深圳|上海|北京|浙江|杭州|东莞|佛山|中山|珠海|惠州|江门|汕头|湛江|肇庆|韶关|清远|梅州|河源|阳江|茂名|潮州|揭阳|云浮|汕尾)[^\n]{0,80})', clean)
+                if m2:
+                    info['公司地址'] = m2.group(0).strip()[:120]
+            else:
+                info['公司地址'] = info['注册地址'][:150]
             # 联系方式
             info['联系方式'] = self.extract_contact(full[:4000])
-            print(f"   公司: {info['公司全称'][:20]} | 主营: {info['主营产品'][:30] or '无'} | 联系方式: {info['联系方式'][:40] or '无'}")
+            print(f"   公司: {info['公司全称'][:18]} | 信用代码: {info['统一社会信用代码'][:6] or '无'} | 注册地址: {info['注册地址'][:24] or '无'}")
         except Exception as e:
             print(f" 公司页抓取失败: {e}")
         self.company_cache[brand_id] = info
@@ -341,10 +359,11 @@ class BossDP:
             return kw.lower() in (job_name or '').lower()
         return True
 
-    def crawl(self,max_pages,keyword:str=Config['keyword']):
-        if os.path.exists("boss_jobs.csv"):
+    def crawl(self,max_pages,keyword:str=Config['keyword'],target:int=0):
+        hist_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "导出结果", "boss_jobs.csv")
+        if os.path.exists(hist_path):
             try:
-                with open("boss_jobs.csv", 'r', encoding='utf-8-sig') as f:
+                with open(hist_path, 'r', encoding='utf-8-sig') as f:
                     reader = csv.DictReader(f)
                     for row in reader:
                         job_id = row.get('encryptJobId') # 注意字段名要对应
@@ -356,12 +375,19 @@ class BossDP:
         self.start_heartbeat()#启动心跳
         print("开始采集")
         consecutive_empty=0
-        for page in range(3,max_pages+1):
+        for page in range(1,max_pages+1):
+            if getattr(self, '_stop_flag', False):
+                print("收到停止信号，停止采集")
+                break
             print(f"\n第{page}页，获取列表中")
             list_result=self.api_job_list(page=page,keyword=keyword)
             if not list_result:
-                print(f"{page}页列表获取失败")
-                break
+                print(f"{page}页列表获取失败，重试1次")
+                time.sleep(random.uniform(5,8))
+                list_result=self.api_job_list(page=page,keyword=keyword)
+                if not list_result:
+                    print(f"{page}页列表仍失败，停止采集")
+                    break
             job_list=list_result['zpData']['jobList']
             if not job_list:
                 print("没有更多岗位了")
@@ -424,7 +450,17 @@ class BossDP:
                     '公司简介':'',
                     '主营产品':'',
                     '公司地址':'',
-                    '联系方式':''
+                    '联系方式':'',
+                    '统一社会信用代码':'',
+                    '法定代表人':'',
+                    '注册资本':'',
+                    '成立日期':'',
+                    '注册地址':'',
+                    '经营范围':'',
+                    '经营状态':'',
+                    '纬度':'',
+                    '经度':'',
+                    '位置标签':''
                 }
                 if security_id:
                     detail_result=None
@@ -450,11 +486,21 @@ class BossDP:
                 try:
                     brand_id = job.get('encryptBrandId','')
                     c_info = self.fetch_company_info(brand_id)
-                    for k in ('公司主页','公司全称','公司简介','主营产品','公司地址','联系方式'):
+                    for k in ('公司主页','公司全称','公司简介','主营产品','公司地址','联系方式',
+                             '统一社会信用代码','法定代表人','注册资本','成立日期','注册地址','经营范围','经营状态'):
                         if c_info.get(k):
                             job_data[k] = c_info[k]
                 except Exception as e:
                     print(f" 公司信息抓取异常: {e}")
+                # 经纬度/位置标签来自详情API
+                try:
+                    for k in ('纬度','经度','位置标签'):
+                        if not job_data.get(k) and detail_result:
+                            dd = self.parse_job_detail(detail_result)
+                            if dd.get(k):
+                                job_data[k] = dd[k]
+                except Exception:
+                    pass
                 # 从工作介绍补充联系方式
                 try:
                     desc = job_data.get('工作介绍','')
@@ -479,6 +525,14 @@ class BossDP:
                 self.all_jobs.append(job_data)
                 delay=random.uniform(5,7)#请求延迟
                 time.sleep(delay)
+            # 每页结束自动保存（防中途关闭丢数据）
+            try:
+                self.save_to_csv()
+            except Exception as _e:
+                print(f" 增量保存失败: {_e}")
+            if target and len(self.all_jobs) >= target:
+                print(f"已采集 {len(self.all_jobs)} 条，达到目标数量 {target}，停止采集")
+                break
             if page<max_pages:
                 print("等待翻页")
                 time.sleep(random.uniform(10,15))
@@ -497,14 +551,18 @@ class BossDP:
             os.makedirs(out_dir, exist_ok=True)
             filename = os.path.join(out_dir, 'boss_jobs.csv')
         file_exists = os.path.isfile(filename)
+        start = getattr(self, '_saved_count', 0)
+        new_rows = self.all_jobs[start:]
+        if not new_rows:
+            return
         with open(filename, 'a', encoding='utf-8-sig', newline='') as f:
             fieldnames = list(self.all_jobs[0].keys())
             writer = csv.DictWriter(f, fieldnames=fieldnames)
             if not file_exists:
                 writer.writeheader()
-            
-            writer.writerows(self.all_jobs)
-        print(f" 数据已追加: {filename}")
+            writer.writerows(new_rows)
+        self._saved_count = len(self.all_jobs)
+        print(f" 数据已追加: {filename} (+{len(new_rows)})")
                 
     #运行
     #运行
@@ -523,7 +581,7 @@ class BossDP:
             import math
             max_pages = max(3, math.ceil(target_count / 15) + 2)
             print(f"目标数量: {target_count} 条，预计采集 {max_pages} 页")
-            self.crawl(max_pages=max_pages)#设置关键词和页数
+            self.crawl(max_pages=max_pages, target=target_count)#设置关键词、页数和目标数量
             if self.all_jobs:
                 self.save_to_csv()
         except KeyboardInterrupt:
