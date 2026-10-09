@@ -9,11 +9,38 @@ from typing import Optional, Dict
 import os
 import csv
 from urllib.parse import quote, unquote
-Config={
-    "start_url":'https://www.zhipin.com/web/geek/jobs?city=101210100&query=数据采集',
-    "heart_time":15,#每4个详情就需要刷新一次，每个详情花3-5秒访问
-    "keyword":quote('数据采集')
-}
+def load_config():
+    """从 config.txt 读取关键词和城市ID"""
+    cfg_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'config.txt')
+    defaults = {'keyword': '数据采集', 'city': '101210100'}
+    if not os.path.exists(cfg_file):
+        with open(cfg_file, 'w', encoding='utf-8') as f:
+            f.write('# BOSS直聘爬虫配置\n')
+            f.write('# 修改下面的关键词和城市ID后保存，重新运行即可生效\n')
+            f.write('# 城市ID示例：101210100=杭州 101280100=广州 101010100=北京 101020100=上海\n')
+            f.write(f"keyword={defaults['keyword']}\n")
+            f.write(f"city={defaults['city']}\n")
+        print(f"[配置] 已创建配置文件: {cfg_file}")
+    cfg = {}
+    with open(cfg_file, 'r', encoding='utf-8') as f:
+        for line in f:
+            line = line.strip()
+            if not line or line.startswith('#'):
+                continue
+            if '=' in line:
+                k, v = line.split('=', 1)
+                cfg[k.strip()] = v.strip()
+    keyword = cfg.get('keyword', defaults['keyword'])
+    city = cfg.get('city', defaults['city'])
+    print(f"[配置] 关键词: {keyword} | 城市ID: {city}")
+    return {
+        "start_url": f'https://www.zhipin.com/web/geek/jobs?city={city}&query={keyword}',
+        "heart_time": 15,
+        "keyword": quote(keyword),
+        "city": city
+    }
+
+Config = load_config()
 class BossDP:
     def __init__(self):
         self.urgent_event=threading.Event()#设置紧急心跳信号
@@ -84,7 +111,7 @@ class BossDP:
                 'Accept': 'application/json, text/plain, */*',
                 'Content-Type': 'application/x-www-form-urlencoded',
                 'origin': 'https://www.zhipin.com',
-                'referer': f'https://www.zhipin.com/web/geek/jobs?city=101210100&query={Config["keyword"]}',
+                'referer': f'https://www.zhipin.com/web/geek/jobs?city={Config["city"]}&query={Config["keyword"]}',
                 'accept-language': 'zh-CN,zh;q=0.9,en-US;q=0.8,en;q=0.7,en-GB;q=0.6',
                 'priority': 'u=1, i',
             }
@@ -154,7 +181,7 @@ class BossDP:
         data_str = (
         f"page={page}&"
         f"pageSize=30&"
-        f"city=101210100&"
+        f"city={Config['city']}&"
         f"query={keyword}&"
         f"scene=1"
         )
