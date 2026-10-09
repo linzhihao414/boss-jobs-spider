@@ -64,6 +64,7 @@ def load_config():
         "start_url": f'https://www.zhipin.com/web/geek/jobs?city={city}&query={keyword}',
         "heart_time": 15,
         "keyword": quote(keyword),
+        "keyword_raw": keyword,
         "city": city
     }
 
@@ -75,8 +76,8 @@ class BossDP:
         import os as _os
         for _p in [r'C:\Program Files\Google\Chrome\Application\chrome.exe', r'C:\Program Files (x86)\Google\Chrome\Application\chrome.exe']:
             if _os.path.exists(_p): co.set_browser_path(_p); break
-        co.auto_port(True)
-        co.set_user_data_path(r'D:\boss_jobs_spider-main\browser_profile')
+        co.set_local_port(9333)
+        co.set_user_data_path(os.path.join(os.path.dirname(os.path.abspath(__file__)), 'browser_profile'))
         co.set_argument('--disable-blink-features=AutomationControlled')
         co.set_argument('--no-sandbox')#初始化了浏览器模拟浏览器指纹
         co.set_user_agent(get_user_agent_of_pc())
@@ -107,6 +108,7 @@ class BossDP:
         #存储数据
         self.all_jobs=[]
         self.seen_job_ids=set()
+        self.company_cache={}
         self.stats={
             'page':0,
             "jobs_fetched":0,
@@ -150,9 +152,10 @@ class BossDP:
     def click_job(self):
         try:
             job_list=self.page.ele('.rec-job-list',timeout=5)
-            if job_list:
-                jobs=job_list.eles('.job-card-box')
+            jobs=job_list.eles('.job-card-box') if job_list else []
             print(f"提取到{len(jobs)}个岗位卡片")
+            if not jobs:
+                return
             job=random.choice(jobs)
             try:
                 job_name=job.ele(".job-name",timeout=2)
@@ -248,21 +251,95 @@ class BossDP:
         zp_data=result['zpData']
         job_info=zp_data['jobInfo']
         brand_info=zp_data['brandComInfo']
-        return{
+        out = {
             "工作介绍":job_info['postDescription'],
             "工作详细地址":job_info['address'],
-            "公司介绍":brand_info['introduce']
+            "公司介绍":brand_info.get('introduce','')
         }
+        if brand_info.get('brandName'):
+            out['公司全称'] = brand_info['brandName']
+        return out
+
+    def extract_contact(self, text: str) -> str:
+        """从文本中提取联系方式：邮箱/手机/座机/微信/QQ"""
+        import re
+        if not text:
+            return ''
+        found=[]
+        for x in re.findall(r'[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}', text):
+            found.append('邮箱:'+x)
+        for x in re.findall(r'1[3-9]\d{9}', text):
+            found.append('电话:'+x)
+        for x in re.findall(r'(?<!\d)(0\d{2,3}-?\d{7,8})(?!\d)', text):
+            found.append('座机:'+x)
+        for x in re.findall(r'(?:微信|wx|vx|weixin)[：: ]*([A-Za-z0-9_\-]{5,20})', text, re.I):
+            found.append('微信:'+x)
+        for x in re.findall(r'QQ[：: ]*(\d{5,12})', text, re.I):
+            found.append('QQ:'+x)
+        seen=set(); out=[]
+        for x in found:
+            if x not in seen:
+                seen.add(x); out.append(x)
+        return '；'.join(out)
+
+    def fetch_company_info(self, brand_id: str) -> dict:
+        """打开公司主页抓取公司简介/地址/联系方式（同一家公司只抓一次）"""
+        import re
+        if not brand_id:
+            return {}
+        if brand_id in self.company_cache:
+            return self.company_cache[brand_id]
+        info = {'公司主页':'', '公司全称':'', '公司简介':'', '主营产品':'', '公司地址':'', '联系方式':''}
+        try:
+            url = f"https://www.zhipin.com/gongsi/{brand_id}.html"
+            info['公司主页'] = url
+            self.page.get(url)
+            time.sleep(random.uniform(2,4))
+            try:
+                t = self.page.title or ''
+                info['公司全称'] = t.replace(' - BOSS直聘','').replace('- BOSS直聘','').strip()
+            except:
+                pass
+            full = ''
+            try:
+                full = self.page.ele('body', timeout=1).text or ''
+            except:
+                pass
+            # 清洗噪音行
+            lines = []
+            for ln in full.split('\n'):
+                s = ln.strip()
+                if not s:
+                    continue
+                if s in ('收藏','分享','举报','在招职位','公司环境','招聘动态','公司地址','工商信息'):
+                    continue
+                lines.append(s)
+            clean = '\n'.join(lines)
+            info['公司简介'] = clean[:1500]
+            # 主营产品：找关键词段落
+            import re as _re
+            m = _re.search(r'(主营[^\n]{0,80}|主营业务[^\n]{0,80}|主打[^\n]{0,80}|主要产品[^\n]{0,80})', clean)
+            if m:
+                info['主营产品'] = m.group(0).strip()[:200]
+            if not info['主营产品']:
+                info['主营产品'] = clean[:200].strip()
+            # 公司地址：常见地址行
+            m2 = _re.search(r'((?:广东|广州|深圳|上海|北京|浙江|杭州|东莞|佛山|中山|珠海|惠州|江门|汕头|湛江|肇庆|韶关|清远|梅州|河源|阳江|茂名|潮州|揭阳|云浮|汕尾)[^\n]{0,60})', clean)
+            if m2:
+                info['公司地址'] = m2.group(0).strip()[:120]
+            # 联系方式
+            info['联系方式'] = self.extract_contact(full[:4000])
+            print(f"   公司: {info['公司全称'][:20]} | 主营: {info['主营产品'][:30] or '无'} | 联系方式: {info['联系方式'][:40] or '无'}")
+        except Exception as e:
+            print(f" 公司页抓取失败: {e}")
+        self.company_cache[brand_id] = info
+        return info
     def is_relevant(self,job_name):
-        whitelist = [
-        '爬虫', 
-        '数据采集', '数据抓取', '数据获取',
-        '逆向', '反爬','采集','RPA','rpa','Python','python'
-    ]
-        for kw in whitelist:
-            if kw.lower() in job_name.lower():
-                return True
-        return False
+        # 按 config.txt 里的关键词匹配（改关键词即改采集范围）
+        kw = Config.get('keyword_raw','')
+        if kw:
+            return kw.lower() in (job_name or '').lower()
+        return True
 
     def crawl(self,max_pages,keyword:str=Config['keyword']):
         if os.path.exists("boss_jobs.csv"):
@@ -341,7 +418,13 @@ class BossDP:
                     '公司行业':job['brandIndustry'],
                     '公司规模':job['brandScaleName'],
                     '公司介绍':"",
-                    '公司福利':job['welfareList']
+                    '公司福利':job['welfareList'],
+                    '公司主页':'',
+                    '公司全称':'',
+                    '公司简介':'',
+                    '主营产品':'',
+                    '公司地址':'',
+                    '联系方式':''
                 }
                 if security_id:
                     detail_result=None
@@ -363,6 +446,36 @@ class BossDP:
                         self.page.close()
                 else:
                     print("缺少securityId")
+                # 公司主页信息（缓存去重）
+                try:
+                    brand_id = job.get('encryptBrandId','')
+                    c_info = self.fetch_company_info(brand_id)
+                    for k in ('公司主页','公司全称','公司简介','主营产品','公司地址','联系方式'):
+                        if c_info.get(k):
+                            job_data[k] = c_info[k]
+                except Exception as e:
+                    print(f" 公司信息抓取异常: {e}")
+                # 从工作介绍补充联系方式
+                try:
+                    desc = job_data.get('工作介绍','')
+                    if desc:
+                        c2 = self.extract_contact(desc)
+                        if c2:
+                            old_c = job_data.get('联系方式','')
+                            job_data['联系方式'] = (old_c + '；' + c2).strip('；') if old_c else c2
+                except Exception:
+                    pass
+                # 公司简介/主营产品：优先用详情API的公司介绍兜底
+                try:
+                    comp_intro = job_data.get('公司介绍','') or ''
+                    if not job_data.get('公司简介') and comp_intro:
+                        job_data['公司简介'] = comp_intro[:1500]
+                    if not job_data.get('主营产品') and comp_intro:
+                        import re as _re
+                        m = _re.search(r'(主营[^\n。]{0,100}|主营业务[^\n。]{0,100}|主打[^\n。]{0,100}|主要产品[^\n。]{0,100})', comp_intro)
+                        job_data['主营产品'] = (m.group(0).strip() if m else comp_intro[:120].strip())
+                except Exception:
+                    pass
                 self.all_jobs.append(job_data)
                 delay=random.uniform(5,7)#请求延迟
                 time.sleep(delay)
@@ -428,5 +541,7 @@ class BossDP:
             except:
                 pass
             print(" 程序结束")
+
+if __name__ == "__main__":
     spider = BossDP()
     spider.run()
