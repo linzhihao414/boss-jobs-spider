@@ -119,14 +119,16 @@ class BossGUI:
             f.write(f"keyword={kw}\ncity={city}\n")
 
     def open_browser(self):
-        if self.spider:
-            messagebox.showinfo("提示", "浏览器已打开，请先扫码登录")
-            return
         kw = self.kw_var.get().strip() or '皮具'
         city = self.city_var.get().strip() or '广州'
         self.settings.update({'keyword': kw, 'city': city})
         self.save_settings()
         self.save_config_txt(kw, city)
+        # 刷新采集配置（不用 reload，直接更新模块全局 Config）
+        bs.Config = bs.load_config()
+        if self.spider:
+            messagebox.showinfo("提示", "浏览器已打开，配置已刷新（新关键词会生效），可直接点「② 开始采集」")
+            return
         self.set_busy(True)
         self.status.set("正在打开浏览器...")
         self.worker = threading.Thread(target=self._open_worker, daemon=True)
@@ -137,8 +139,6 @@ class BossGUI:
         old = sys.stdout
         sys.stdout = redirect
         try:
-            import importlib
-            importlib.reload(bs)
             self.log("[配置] 正在启动浏览器...\n")
             self.spider = bs.BossDP()
             self.spider._stop_flag = False
@@ -167,10 +167,15 @@ class BossGUI:
         except Exception:
             count = 100
         count = max(10, min(count, 3000))
-        self.settings.update({'count': count, 'dedup': self.dedup_var.get()})
+        # 每次开始采集前都刷新配置（改关键词/城市立即生效）
+        kw = self.kw_var.get().strip() or '皮具'
+        city = self.city_var.get().strip() or '广州'
+        self.settings.update({'keyword': kw, 'city': city, 'count': count, 'dedup': self.dedup_var.get()})
         self.save_settings()
+        self.save_config_txt(kw, city)
+        bs.Config = bs.load_config()
         self.set_busy(True)
-        self.status.set(f"采集中：目标 {count} 条")
+        self.status.set(f"采集中：{kw} / {city} / 目标 {count} 条")
         self.worker = threading.Thread(target=self._crawl_worker, args=(count,), daemon=True)
         self.worker.start()
 
@@ -185,7 +190,8 @@ class BossGUI:
             self.spider.get_cookie_headers()
             max_pages = max(2, math.ceil(count / 30) + 1)
             self.log(f"开始采集，目标 {count} 条，预计 {max_pages} 页\n")
-            self.spider.crawl(max_pages=max_pages, target=count)
+            # 显式传最新关键词，避免默认参数绑定旧值
+            self.spider.crawl(max_pages=max_pages, target=count, keyword=bs.Config['keyword'])
             self.spider.save_to_csv()
             out = os.path.join(BASE, '导出结果', 'boss_jobs.csv')
             self.log(f"\n===== 采集完成 =====\n")
