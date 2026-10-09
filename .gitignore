@@ -5,3 +5,6 @@ __pycache__/
 导出结果/
 _test*.py
 boss_jobs.csv
+
+data/
+settings.json
