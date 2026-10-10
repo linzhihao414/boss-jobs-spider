@@ -399,7 +399,8 @@ class BossDP:
         self.company_cache[brand_id] = info
         return info
     def is_relevant(self,job_name):
-        # 按 config.txt 里的关键词匹配，支持多个关键词（逗号/顿号/空格分隔），命中任一即保留
+        # 宽松匹配：岗位名包含任一关键词，或包含关键词的主体（去掉设计/采购/开发等职能后缀）
+        # 例：「女包设计」→ 岗位名含「女包」都收（女包主播/女包QC/女包面料设计师）
         kw = Config.get('keyword_raw','')
         if not kw:
             return True
@@ -408,6 +409,15 @@ class BossDP:
         parts = [p.strip().lower() for p in _re.split(r'[,，、|]+', kw) if p.strip()]
         for p in parts:
             if p and p in name:
+                return True
+            # 降级匹配：去掉尾部职能后缀后的主体词
+            core = p
+            for suf in ["采购经理", "采购主管", "开发工程师", "设计师", "采购", "设计", "开发",
+                        "工程师", "主管", "经理", "专员", "助理", "跟单", "质检", "qc", "销售", "运营"]:
+                if core.endswith(suf) and len(core) > len(suf) + 1:
+                    core = core[:-len(suf)]
+                    break
+            if len(core) >= 2 and core in name:
                 return True
         return False
 
@@ -424,6 +434,7 @@ class BossDP:
                 print(f" 历史库加载完成，已过滤 {len(self.seen_job_ids)} 条旧数据")
             except:
                 pass
+        self.output_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), "导出结果", "boss_jobs.csv")
         self.start_heartbeat()#启动心跳
         # 支持多关键词（逗号/顿号/竖线分隔），逐个搜索采集，结果自动去重合并
         import re as _re2
@@ -635,7 +646,10 @@ class BossDP:
         if filename is None:
             out_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), '导出结果')
             os.makedirs(out_dir, exist_ok=True)
-            filename = os.path.join(out_dir, 'boss_jobs.csv')
+            filename = getattr(self, 'output_file', None)
+            if not filename:
+                filename = os.path.join(out_dir, 'boss_jobs.csv')
+                self.output_file = filename
         file_exists = os.path.isfile(filename)
         start = getattr(self, '_saved_count', 0)
         new_rows = self.all_jobs[start:]
