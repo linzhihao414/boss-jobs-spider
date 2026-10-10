@@ -8,3 +8,7 @@ boss_jobs.csv
 
 data/
 settings.json
+
+_test_profile/
+_probe*.py
+
