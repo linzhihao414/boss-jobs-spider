@@ -398,11 +398,17 @@ class BossDP:
         self.company_cache[brand_id] = info
         return info
     def is_relevant(self,job_name):
-        # 按 config.txt 里的关键词匹配（改关键词即改采集范围）
+        # 按 config.txt 里的关键词匹配，支持多个关键词（逗号/顿号/空格分隔），命中任一即保留
         kw = Config.get('keyword_raw','')
-        if kw:
-            return kw.lower() in (job_name or '').lower()
-        return True
+        if not kw:
+            return True
+        name = (job_name or '').lower()
+        import re as _re
+        parts = [p.strip().lower() for p in _re.split(r'[,，、|]+', kw) if p.strip()]
+        for p in parts:
+            if p and p in name:
+                return True
+        return False
 
     def crawl(self,max_pages,keyword:str=Config['keyword'],target:int=0):
         hist_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "导出结果", "boss_jobs.csv")
@@ -418,7 +424,28 @@ class BossDP:
             except:
                 pass
         self.start_heartbeat()#启动心跳
-        print("开始采集")
+        # 支持多关键词（逗号/顿号/竖线分隔），逐个搜索采集，结果自动去重合并
+        import re as _re2
+        keywords = [k.strip() for k in _re2.split(r'[,，、|]+', keyword) if k.strip()]
+        if not keywords:
+            keywords = [keyword]
+        per_kw_target = max(1, target // len(keywords)) if target else 0
+        print(f"共 {len(keywords)} 个关键词: {'、'.join(keywords)}，每个关键词目标 {per_kw_target} 条")
+        for kw in keywords:
+            if getattr(self, '_stop_flag', False):
+                break
+            if target and len(self.all_jobs) >= target:
+                break
+            print(f"\n===== 关键词「{kw}」开始采集 =====")
+            self._crawl_kw(kw, per_kw_target)
+        print(f"   采集页数: {self.stats['page']}")
+        print(f"   获取岗位: {self.stats['jobs_fetched']}")
+        print(f"   详情成功: {self.stats['details_success']}")
+        print(f"   实际入库: {len(self.all_jobs)}")
+        return self.all_jobs
+
+    def _crawl_kw(self, keyword, target):
+        kw_start = len(self.all_jobs)
         consecutive_empty=0
         page = 0
         while True:
@@ -429,7 +456,7 @@ class BossDP:
             if page > 100:
                 print("已达100页上限，停止采集")
                 break
-            print(f"\n第{page}页，获取列表中")
+            print(f"\n第{page}页（关键词: {keyword}），获取列表中")
             list_result=self.api_job_list(page=page,keyword=keyword)
             if not list_result:
                 print(f"{page}页列表获取失败，重试1次")
@@ -449,7 +476,7 @@ class BossDP:
                 encrypt_job_id = job['encryptJobId']
                 if encrypt_job_id not in self.seen_job_ids:
                     new_jobs.append(job)
-            # 白名单过滤
+            # 白名单过滤：岗位名含任一关键词即保留（不管职位类型）
             relevant_jobs = []
             filtered_count = 0
             for job in new_jobs:
@@ -530,7 +557,10 @@ class BossDP:
                         self.stats['details_success'] += 1
                     else:
                         print("详情获取失败")
-                        self.page.close()
+                        try:
+                            self.page.close()
+                        except Exception:
+                            pass
                 else:
                     print("缺少securityId")
                 # 公司主页信息（缓存去重）
@@ -587,16 +617,12 @@ class BossDP:
                 self.save_to_csv()
             except Exception as _e:
                 print(f" 增量保存失败: {_e}")
-            if target and len(self.all_jobs) >= target:
-                print(f"已采集 {len(self.all_jobs)} 条，达到目标数量 {target}，停止采集")
+            if target and len(self.all_jobs) - kw_start >= target:
+                print(f"关键词「{keyword}」已采集 {len(self.all_jobs) - kw_start} 条，达到目标 {target}，停止采集")
                 break
             print("等待翻页")
             time.sleep(random.uniform(10,15))
-        print(f"   采集页数: {self.stats['page']}")
-        print(f"   获取岗位: {self.stats['jobs_fetched']}")
-        print(f"   详情成功: {self.stats['details_success']}")
-        print(f"   实际入库: {len(self.all_jobs)}")
-        return self.all_jobs
+
     def save_to_csv(self, filename: str = None):
         """保存为 CSV 文件（默认导出到「导出结果」文件夹，文件被占用时自动重试）"""
         if not self.all_jobs:
@@ -649,7 +675,7 @@ class BossDP:
             if self.all_jobs:
                 self.save_to_csv()
         except KeyboardInterrupt:
-            print("\\n 用户中断")
+            print("\n 用户中断")
             self.save_to_csv()
         except Exception as e:
             print(f" 程序异常: {e}")
