@@ -208,15 +208,16 @@ class BossDP:
     def api_job_list(self,page:int =1,keyword:str=Config['keyword'])->Optional[Dict]:
         self.get_cookie_headers()#请求前同步cookies
         url="https://www.zhipin.com/wapi/zpgeek/search/joblist.json"
-        data_str = (
-        f"page={page}&"
-        f"pageSize=30&"
-        f"city={Config['city']}&"
-        f"query={keyword}&"
-        f"scene=1"
-        )
+        # 用字典 data：requests 自动按 UTF-8 做表单编码，避免中文 latin-1 报错
+        data = {
+            "page": page,
+            "pageSize": 30,
+            "city": Config['city'],
+            "query": keyword,
+            "scene": 1,
+        }
         try:
-            res=self.session.post(url,data=data_str,headers=self.current_headers,timeout=15)
+            res=self.session.post(url,data=data,headers=self.current_headers,timeout=15)
             if res.status_code==200:
                 result=res.json()
                 if result.get('code')==0:
