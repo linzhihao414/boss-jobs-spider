@@ -61,9 +61,9 @@ def load_config():
             city = '101210100'
     print(f"[配置] 关键词: {keyword} | 城市: {city_raw} (ID:{city})")
     return {
-        "start_url": f'https://www.zhipin.com/web/geek/jobs?city={city}&query={keyword}',
+        "start_url": f'https://www.zhipin.com/web/geek/jobs?city={city}&query={quote(keyword)}',
         "heart_time": 15,
-        "keyword": quote(keyword),
+        "keyword": keyword,
         "keyword_raw": keyword,
         "city": city
     }
@@ -484,13 +484,16 @@ class BossDP:
                     relevant_jobs.append(job)
                 else:
                     filtered_count += 1
-                    print(f"关键词过滤: {job['jobName']}")
+                    if filtered_count <= 5:  # 只打印前5条，避免刷屏
+                        print(f"关键词过滤: {job['jobName']}")
+            if filtered_count > 5:
+                print(f"  ...其余 {filtered_count-5} 条不相关已过滤")
             # 检测连续无新相关岗位
             if len(relevant_jobs) == 0:
                 consecutive_empty += 1
                 print(f"本页 {len(job_list)} 个岗位全部重复或不相关，连续 {consecutive_empty} 页")
-                if consecutive_empty >= 5:
-                    print("连续5页无新岗位，停止采集")
+                if consecutive_empty >= 3:
+                    print("连续3页无新岗位，停止采集")
                     break
                 continue
             else:
