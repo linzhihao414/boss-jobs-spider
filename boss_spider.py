@@ -140,7 +140,7 @@ class BossDP:
                 'Accept': 'application/json, text/plain, */*',
                 'Content-Type': 'application/x-www-form-urlencoded',
                 'origin': 'https://www.zhipin.com',
-                'referer': f'https://www.zhipin.com/web/geek/jobs?city={Config["city"]}&query={Config["keyword"]}',
+                'referer': Config['start_url'],  # start_url 已对关键词URL编码，headers保持纯ASCII
                 'accept-language': 'zh-CN,zh;q=0.9,en-US;q=0.8,en;q=0.7,en-GB;q=0.6',
                 'priority': 'u=1, i',
             }
