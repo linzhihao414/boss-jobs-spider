@@ -368,6 +368,12 @@ class BossDP:
             info['注册地址'] = _pick(r'注册地址\s*[:：]?\s*([^\n\r]{5,150})', clean)
             info['经营状态'] = _pick(r'经营状态\s*[:：]?\s*([^\n\r]{1,20})', clean)
             info['经营范围'] = _pick(r'经营范围\s*[:：]?\s*([^\n\r]{10,800})', clean)
+            # 企业全称：工商卡片顶部的「企业名称」（覆盖BOSS列表页的「xx招聘」格式）
+            full_name = _pick(r'企业名称\s*[:：]?\s*([^\n\r]{2,60})', clean)
+            if full_name and ('招聘' not in full_name or '有限公司' in full_name or '厂' in full_name):
+                info['公司全称'] = full_name
+            if not info['公司全称']:
+                info['公司全称'] = _pick(r'(?:公司全称|企业名称)\s*[:：]?\s*([^\n\r]{2,60})', clean)
             # 成立年限：由成立日期精确计算（动态取当前日期）
             info['成立年限'] = ''
             try:
@@ -555,6 +561,9 @@ class BossDP:
                     '经度':'',
                     '位置标签':''
                 }
+                # 兜底：公司全称没抓到时用列表页品牌名（清洗BOSS格式）
+                if not job_data['公司全称']:
+                    job_data['公司全称'] = company.replace('「','').replace('」','').replace('招聘','').replace('-BOSS直聘','').strip()
                 if security_id:
                     detail_result=None
                     for retry in range(2):
