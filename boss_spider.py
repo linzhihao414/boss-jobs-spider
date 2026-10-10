@@ -420,9 +420,14 @@ class BossDP:
         self.start_heartbeat()#启动心跳
         print("开始采集")
         consecutive_empty=0
-        for page in range(1,max_pages+1):
+        page = 0
+        while True:
+            page += 1
             if getattr(self, '_stop_flag', False):
                 print("收到停止信号，停止采集")
+                break
+            if page > 100:
+                print("已达100页上限，停止采集")
                 break
             print(f"\n第{page}页，获取列表中")
             list_result=self.api_job_list(page=page,keyword=keyword)
@@ -585,9 +590,8 @@ class BossDP:
             if target and len(self.all_jobs) >= target:
                 print(f"已采集 {len(self.all_jobs)} 条，达到目标数量 {target}，停止采集")
                 break
-            if page<max_pages:
-                print("等待翻页")
-                time.sleep(random.uniform(10,15))
+            print("等待翻页")
+            time.sleep(random.uniform(10,15))
         print(f"   采集页数: {self.stats['page']}")
         print(f"   获取岗位: {self.stats['jobs_fetched']}")
         print(f"   详情成功: {self.stats['details_success']}")

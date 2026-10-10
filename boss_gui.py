@@ -195,8 +195,8 @@ class BossGUI:
             import time
             time.sleep(3)
             self.spider.get_cookie_headers()
-            max_pages = max(2, math.ceil(count / 30) + 1)
-            self.log(f"开始采集，目标 {count} 条，预计 {max_pages} 页\n")
+            max_pages = max(5, math.ceil(count / 8) + 2)
+            self.log(f"开始采集，目标 {count} 条（不足将自动翻页直到采满或100页）\n")
             # 显式传最新关键词，避免默认参数绑定旧值
             self.spider.crawl(max_pages=max_pages, target=count, keyword=bs.Config['keyword'])
             self.spider.save_to_csv()
