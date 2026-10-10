@@ -24,7 +24,7 @@ class TextRedirector(io.StringIO):
 class BossGUI:
     def __init__(self, root):
         self.root = root
-        root.title("BOSS直聘岗位采集工具")
+        root.title("BOSS直聘岗位采集工具 v2.3（latin-1修复版）")
         root.geometry("780x580")
         root.minsize(700, 480)
         self.log_queue = queue.Queue()
